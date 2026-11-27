@@ -44,6 +44,7 @@
 #include "planning_params.h"
 #include "utils.h"
 #include "pid_controller.h"
+#include "control_errors.h"
 
 #include <limits>
 #include <iostream>
@@ -214,19 +215,33 @@ int main ()
   time_t timer;
   time(&prev_timer);
 
-  // initialize pid steer
-  /**
-  * TODO (Step 1): create pid (pid_steer) for steer command and initialize values
-  **/
+  // Gains for the heading controller (steer command).
+  // STARTING VALUES ONLY: not yet tuned in the simulator. Change one gain per
+  // tuning run and record each run.
+  const double kSteerKp = 0.3;
+  const double kSteerKi = 0.0;
+  const double kSteerKd = 0.0;
+  // The steer command must stay inside [-1.2, 1.2].
+  const double kSteerOutputMax = 1.2;
+  const double kSteerOutputMin = -1.2;
 
+  // Gains for the speed controller (throttle command).
+  // STARTING VALUES ONLY: not yet tuned in the simulator.
+  const double kThrottleKp = 0.2;
+  const double kThrottleKi = 0.0;
+  const double kThrottleKd = 0.0;
+  // The throttle command must stay inside [-1, 1]; a negative value is
+  // applied as braking further down.
+  const double kThrottleOutputMax = 1.0;
+  const double kThrottleOutputMin = -1.0;
+
+  // initialize pid steer
+  PID pid_steer = PID();
+  pid_steer.Init(kSteerKp, kSteerKi, kSteerKd, kSteerOutputMax, kSteerOutputMin);
 
   // initialize pid throttle
-  /**
-  * TODO (Step 1): create pid (pid_throttle) for throttle command and initialize values
-  **/
-
-  PID pid_steer = PID();
   PID pid_throttle = PID();
+  pid_throttle.Init(kThrottleKp, kThrottleKi, kThrottleKd, kThrottleOutputMax, kThrottleOutputMin);
 
   h.onMessage([&pid_steer, &pid_throttle, &new_delta_time, &timer, &prev_timer, &i, &prev_timer](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode)
   {
@@ -285,87 +300,93 @@ int main ()
           // Steering control
           ////////////////////////////////////////
 
-          /**
-          * TODO (step 3): uncomment these lines
-          **/
-//           // Update the delta time with the previous command
-//           pid_steer.UpdateDeltaTime(new_delta_time);
+          // Update the delta time with the previous command
+          pid_steer.UpdateDeltaTime(new_delta_time);
 
           // Compute steer error
-          double error_steer;
-
+          //
+          // The steer error is a heading error: the angle between where the
+          // car should be pointing and where it is pointing (yaw).
+          //  - "Where it should be pointing" is the direction from the car's
+          //    current position to the last point of the planned trajectory,
+          //    the same point whose planned speed drives the throttle.
+          //  - The error is desired minus actual, so a target to the left
+          //    (counter-clockwise) gives a positive error and, with positive
+          //    gains, a positive steer command.
+          //  - The difference is wrapped into [-pi, pi] so the car always
+          //    turns the short way round.
+          //  - If the planner returned no points, or the car is already on
+          //    the target point, there is no direction to aim at and the
+          //    error is 0.
+          double error_steer = 0.0;
+          if (!x_points.empty() && !y_points.empty()) {
+            error_steer = control_errors::HeadingError(
+                x_position, y_position, yaw, x_points.back(), y_points.back());
+          }
 
           double steer_output;
 
-          /**
-          * TODO (step 3): compute the steer error (error_steer) from the position and the desired trajectory
-          **/
-//           error_steer = 0;
+          // Compute control to apply
+          pid_steer.UpdateError(error_steer);
+          steer_output = pid_steer.TotalError();
 
-          /**
-          * TODO (step 3): uncomment these lines
-          **/
-//           // Compute control to apply
-//           pid_steer.UpdateError(error_steer);
-//           steer_output = pid_steer.TotalError();
-
-//           // Save data
-//           file_steer.seekg(std::ios::beg);
-//           for(int j=0; j < i - 1; ++j) {
-//               file_steer.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-//           }
-//           file_steer  << i ;
-//           file_steer  << " " << error_steer;
-//           file_steer  << " " << steer_output << endl;
+          // Save data
+          file_steer.seekg(std::ios::beg);
+          for(int j=0; j < i - 1; ++j) {
+              file_steer.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+          }
+          file_steer  << i ;
+          file_steer  << " " << error_steer;
+          file_steer  << " " << steer_output << endl;
 
           ////////////////////////////////////////
           // Throttle control
           ////////////////////////////////////////
 
-          /**
-          * TODO (step 2): uncomment these lines
-          **/
-//           // Update the delta time with the previous command
-//           pid_throttle.UpdateDeltaTime(new_delta_time);
+          // Update the delta time with the previous command
+          pid_throttle.UpdateDeltaTime(new_delta_time);
 
           // Compute error of speed
-          double error_throttle;
-          /**
-          * TODO (step 2): compute the throttle error (error_throttle) from the position and the desired speed
-          **/
-          // modify the following line for step 2
-          error_throttle = 0;
-
-
+          //
+          // The throttle error is a speed error: the speed the planner wants
+          // minus the speed the car has.
+          //  - The desired speed is the planned speed at the last point of
+          //    the trajectory (the last element of v_points).
+          //  - The error is desired minus actual, so a car that is too slow
+          //    gets a positive error and a positive (accelerating) command,
+          //    and a car that is too fast gets a negative command, which is
+          //    turned into braking below.
+          //  - If the planner returned no points, the error is 0.
+          double error_throttle = 0.0;
+          if (!v_points.empty()) {
+            error_throttle = control_errors::SpeedError(v_points.back(), velocity);
+          }
 
           double throttle_output;
           double brake_output;
 
-          /**
-          * TODO (step 2): uncomment these lines
-          **/
-//           // Compute control to apply
-//           pid_throttle.UpdateError(error_throttle);
-//           double throttle = pid_throttle.TotalError();
+          // Compute control to apply
+          pid_throttle.UpdateError(error_throttle);
+          double throttle = pid_throttle.TotalError();
 
-//           // Adapt the negative throttle to break
-//           if (throttle > 0.0) {
-//             throttle_output = throttle;
-//             brake_output = 0;
-//           } else {
-//             throttle_output = 0;
-//             brake_output = -throttle;
-//           }
+          // Adapt the negative throttle to break
+          if (throttle > 0.0) {
+            throttle_output = throttle;
+            brake_output = 0;
+          } else {
+            throttle_output = 0;
+            brake_output = -throttle;
+          }
 
-//           // Save data
-//           file_throttle.seekg(std::ios::beg);
-//           for(int j=0; j < i - 1; ++j){
-//               file_throttle.ignore(std::numeric_limits<std::streamsize>::max(),'\n');
-//           }
-//           file_throttle  << i ;
-//           file_throttle  << " " << error_throttle;
-//           file_throttle  << " " << brake_output;
-//           file_throttle  << " " << throttle_output << endl;
+          // Save data
+          file_throttle.seekg(std::ios::beg);
+          for(int j=0; j < i - 1; ++j){
+              file_throttle.ignore(std::numeric_limits<std::streamsize>::max(),'\n');
+          }
+          file_throttle  << i ;
+          file_throttle  << " " << error_throttle;
+          file_throttle  << " " << brake_output;
+          file_throttle  << " " << throttle_output << endl;
 
 
           // Send control

@@ -1,4 +1,4 @@
-# Unit tests for the PID class. This build is separate from the main
+# Unit tests for the PID class and the error computations. This build is separate from the main
 # pid_controller build so it needs neither CARLA nor the planner sources.
 #
 # From project/pid_controller:
@@ -19,6 +19,7 @@ find_package(Threads REQUIRED)
 
 add_executable(pid_controller_test
   pid_controller_test.cpp
+  control_errors_test.cpp
   ../pid_controller.cpp)
 
 target_compile_options(pid_controller_test PRIVATE -Wall -Wextra)
