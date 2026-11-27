@@ -1,0 +1,5 @@
+# Gains for the next run. Read by pid_controller at start-up; no rebuild needed.
+# Format: <controller> <Kp> <Ki> <Kd>
+# Change ONE number per tuning run, then run ./archive_run.sh afterwards.
+steer    0.3 0.0 0.0
+throttle 0.2 0.0 0.0

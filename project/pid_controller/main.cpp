@@ -45,6 +45,7 @@
 #include "utils.h"
 #include "pid_controller.h"
 #include "control_errors.h"
+#include "pid_gains.h"
 
 #include <limits>
 #include <iostream>
@@ -215,21 +216,30 @@ int main ()
   time_t timer;
   time(&prev_timer);
 
-  // Gains for the heading controller (steer command).
-  // STARTING VALUES ONLY: not yet tuned in the simulator. Change one gain per
-  // tuning run and record each run.
-  const double kSteerKp = 0.3;
-  const double kSteerKi = 0.0;
-  const double kSteerKd = 0.0;
+  // Default gains: {Kp, Ki, Kd}.
+  // STARTING VALUES ONLY: not yet tuned in the simulator.
+  pid_gains::ControllerGains default_gains;
+  default_gains.steer = {0.3, 0.0, 0.0};     // heading controller
+  default_gains.throttle = {0.2, 0.0, 0.0};  // speed controller
+
+  // During tuning the gains can be changed without rebuilding: if a file
+  // named pid_gains.txt exists in the directory the program is started from
+  // (project/), its values replace the defaults above. See pid_gains.h for
+  // the format. A malformed file stops the program, so a run is never
+  // recorded under gains it did not use.
+  const std::string kGainsFile = "pid_gains.txt";
+  const pid_gains::ParseResult loaded_gains = pid_gains::LoadGains(kGainsFile, default_gains);
+  if (!loaded_gains.ok) {
+    cerr << "Error: " << loaded_gains.error << endl;
+    return 1;
+  }
+  const pid_gains::ControllerGains gains = loaded_gains.gains;
+  cout << "PID gains (" << (loaded_gains.from_file ? kGainsFile : "built-in defaults") << "):" << endl
+       << pid_gains::FormatGains(gains);
+
   // The steer command must stay inside [-1.2, 1.2].
   const double kSteerOutputMax = 1.2;
   const double kSteerOutputMin = -1.2;
-
-  // Gains for the speed controller (throttle command).
-  // STARTING VALUES ONLY: not yet tuned in the simulator.
-  const double kThrottleKp = 0.2;
-  const double kThrottleKi = 0.0;
-  const double kThrottleKd = 0.0;
   // The throttle command must stay inside [-1, 1]; a negative value is
   // applied as braking further down.
   const double kThrottleOutputMax = 1.0;
@@ -237,11 +247,11 @@ int main ()
 
   // initialize pid steer
   PID pid_steer = PID();
-  pid_steer.Init(kSteerKp, kSteerKi, kSteerKd, kSteerOutputMax, kSteerOutputMin);
+  pid_steer.Init(gains.steer.kp, gains.steer.ki, gains.steer.kd, kSteerOutputMax, kSteerOutputMin);
 
   // initialize pid throttle
   PID pid_throttle = PID();
-  pid_throttle.Init(kThrottleKp, kThrottleKi, kThrottleKd, kThrottleOutputMax, kThrottleOutputMin);
+  pid_throttle.Init(gains.throttle.kp, gains.throttle.ki, gains.throttle.kd, kThrottleOutputMax, kThrottleOutputMin);
 
   h.onMessage([&pid_steer, &pid_throttle, &new_delta_time, &timer, &prev_timer, &i, &prev_timer](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode)
   {
